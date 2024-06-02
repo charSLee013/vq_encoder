@@ -13,4 +13,4 @@ train:
 
 data:
   train_data_path: "/tmp/芙宁娜"
-  val_split: 0.2
+  val_split: 0.1

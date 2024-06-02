@@ -108,7 +108,7 @@ def train_model(config, resample, batch_size):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train VQEncoder model")
-    parser.add_argument('--config', type=str, required=True, default="./train_config.yaml", help="Path to the config file")
+    parser.add_argument('--config', type=str, required=False, default="./train_config.yaml", help="Path to the config file")
     parser.add_argument('--resample', action='store_true', help="Resample audio files to match the target sample rate")
     parser.add_argument('--batch_size', type=int, default=os.cpu_count(), help="Number of threads for processing audio files")
     args = parser.parse_args()

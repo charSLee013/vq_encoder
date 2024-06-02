@@ -4,14 +4,22 @@ import os
 import torch
 from torch import nn, optim
 from torch.cuda.amp import GradScaler, autocast
-from torch.utils.data import DataLoader, random_split  # 添加这行
+from torch.utils.data import DataLoader, random_split
 
-from dataset import AudioDataset, collate_fn, get_audio_files, load_config
+from dataset import AudioDataset, get_audio_files, load_config
 from modules.vq_encoder import VQEncoder
+
 # 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def collate_fn(batch):
+    audios, lengths = zip(*batch)
+    max_length = max(lengths)
+    padded_audios = torch.zeros(len(audios), 1, max_length)
+    for i, audio in enumerate(audios):
+        padded_audios[i, 0, :audio.shape[1]] = audio
+    return padded_audios, torch.tensor(lengths)
 
 def train_model(config, resample, batch_size):
     # 加载数据集
@@ -39,12 +47,8 @@ def train_model(config, resample, batch_size):
     train_loader = DataLoader(train_dataset, batch_size=config['train']['batch_size'], shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=config['train']['batch_size'], shuffle=False, collate_fn=collate_fn)
 
-    # 找寻最佳的设备
-    device = 'cpu'
-    if torch.cuda.is_available():
-        device = 'cuda:0'
-
     # 初始化模型、损失函数和优化器
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f'Using device: {device}')
     model = VQEncoder(
         sample_rate=config['train']['sample_rate'],
@@ -72,7 +76,7 @@ def train_model(config, resample, batch_size):
             audios = audios.to(device)
             lengths = lengths.to(device)
             
-            encoded_features = model(audios, lengths, sr=target_sample_rate)
+            encoded_features = model(audios, lengths)
             loss = criterion(encoded_features, audios)  # Example loss computation
             
             optimizer.zero_grad()
@@ -93,12 +97,18 @@ def train_model(config, resample, batch_size):
             val_loss /= len(val_loader)
             logger.info(f'Validation Loss: {val_loss:.4f}')
 
-    # 保存模型
+        # 每10个epoch保存一次模型
+        if (epoch + 1) % 10 == 0:
+            model_path = f'vq_encoder_epoch_{epoch+1}.pth'
+            torch.save(model.state_dict(), model_path)
+            logger.info(f'Model saved to {model_path}')
+
+    # 保存最终模型
     torch.save(model.state_dict(), 'vq_encoder.pth')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train VQEncoder model")
-    parser.add_argument('--config', type=str, required=True,default="./train_config.yaml" ,help="Path to the config file")
+    parser.add_argument('--config', type=str, required=True, default="./train_config.yaml", help="Path to the config file")
     parser.add_argument('--resample', action='store_true', help="Resample audio files to match the target sample rate")
     parser.add_argument('--batch_size', type=int, default=os.cpu_count(), help="Number of threads for processing audio files")
     args = parser.parse_args()

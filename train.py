@@ -77,7 +77,12 @@ def train_model(config, resample, batch_size):
             lengths = lengths.to(device)
             
             encoded_features = model(audios, lengths)
-            loss = criterion(encoded_features, audios)  # Example loss computation
+            
+            # 计算目标特征
+            target_features, _ = model.encode(audios, lengths)
+            
+            # 计算损失
+            loss = criterion(encoded_features, target_features)
             
             optimizer.zero_grad()
             scaler.scale(loss).backward()

@@ -22,17 +22,20 @@ class VQEncoder(nn.Module):
                  # 每次 FFT 计算时使用的窗口长度，单位是采样点数,通常，win_length 与 n_fft 相同
                  win_length=2048):
         super().__init__()
+        # 这是一个深度卷积神经网络，用于提取音频信号的高级特征。
+        # WaveNet 是一种非常有效的音频生成模型，它能够捕捉音频信号的时间结构和频谱特征。
         self.encoder = WaveNet(
             input_channels=n_mels,
             residual_channels=768,
             residual_layers=20,
             dilation_cycle=4,
         )
-        # 使用残差量化方法有效地将潜在表示量化为离散代码
+        #  这是一个向量量化器，它将 WaveNet 提取的特征映射到离散的码本中。
+        # 向量量化是一种将连续信号转换为离散表示的技术，它有助于模型学习到音色的不变性，因为相同的音色应该映射到相同的码字
         self.quantizer = DownsampleFiniteScalarQuantize(
             input_dim=768, n_codebooks=1, n_groups=2, levels=[8, 5, 5, 5]
         )
-        # 该组件将音频信号转换为梅尔频谱图，用作编码器的输入特征
+        # 这是一个特征提取器，用于将音频信号转换为梅尔谱图。梅尔谱图是一种常用的音频特征表示，它能够捕捉音频的频谱特性。
         self.spec = LogMelSpectrogram(
             sample_rate=sample_rate,
             n_fft=n_fft,
@@ -46,6 +49,10 @@ class VQEncoder(nn.Module):
 
     @torch.no_grad()
     def forward(self, audios, audio_lengths, sr=None):
+        """在前向传播中，VQEncoder 首先将输入音频转换为梅尔谱图，然后使用 WaveNet 提取特征。接着，这些特征被送入向量量化器进行离散化。离散化后的特征表示是音色的固定表示，因为它们是从一个预定义的码本中选择的，这个码本是在训练过程中学习到的，它包含了与音色相关的信息。
+
+        通过这种方式，VQEncoder 能够将音频信号编码成一种固定音色的表示，这种表示对于生成具有特定音色的语音非常有用。在模型的其他部分，如生成器中，这些离散的音色表示可以用来合成具有相同音色的语音。
+        """
         # 将输入的音频信号 audios 转换为梅尔频谱图
         mel_spec = self.spec(audios, sample_rate=sr)
         if sr is not None:

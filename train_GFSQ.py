@@ -118,9 +118,9 @@ def dynamic_collate_fn(batch):
 
 
 model_params = {
-    "WaveNet": {"input_channels": 128, "output_channels": 1024, 'residual_layers': 20, 'dilation_cycle': 4},
-    "GFSQ": {"dim": 1024, "levels": [8, 5, 5, 5], "G": 2, "R": 1},
-    "DVAEDecoder": {"idim": 1024, "odim": 128}
+    "WaveNet": {"input_channels": 128, "output_channels": 768, 'residual_layers': 20, 'dilation_cycle': 4},
+    "GFSQ": {"dim": 768, "levels": [8, 5, 5, 5], "G": 2, "R": 2},
+    "DVAEDecoder": {"idim": 768, "odim": 128}
 }
 
 

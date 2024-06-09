@@ -47,7 +47,7 @@ writer = SummaryWriter(log_dir=log_dir)
 
 
 class AudioDataset(Dataset):
-    def __init__(self, audio_files, sample_rate=44100,n_fft =1024,hop_length=256,n_mels=100):
+    def __init__(self, audio_files, sample_rate=24000,n_fft =1024,hop_length=256,n_mels=100):
         # 初始化音频文件列表和Mel谱图转换器
         self.audio_files = audio_files
         # self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(sample_rate=sample_rate)
@@ -275,7 +275,7 @@ import librosa
 import numpy as np
 import torch
 
-def mel_to_audio(mel_spectrogram, sr=44100, n_fft=1024, hop_length=256, win_length=None):
+def mel_to_audio(mel_spectrogram, sr=24000, n_fft=1024, hop_length=256, win_length=None):
     """将 Mel 频谱图转换回音频信号"""
     # 确保输入为 NumPy 数组
     if isinstance(mel_spectrogram, torch.Tensor):
@@ -363,19 +363,19 @@ for epoch in range(start_epoch, num_epochs):
                 loss_l1 = F.l1_loss(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的L1损失
                 val_loss_l1 += loss_l1.item()  # 累加验证L1损失
 
-                # 仅在每个 epoch 的第一个 batch 上进行音频解码和可视化
-                if batch_index == 0:
-                    # 解码回音频
-                    mel_spec_np = mel_spectrogram[0].cpu().numpy()
-                    decoded_features_np = decoded_features[0].cpu().numpy()
+                # # 仅在每个 epoch 的第一个 batch 上进行音频解码和可视化
+                # if batch_index == 0:
+                #     # 解码回音频
+                #     mel_spec_np = mel_spectrogram[0].cpu().numpy()
+                #     decoded_features_np = decoded_features[0].cpu().numpy()
 
-                    # 调用 librosa 的 mel_to_audio 函数
-                    audio_original = mel_to_audio(mel_spec_np, n_fft=1024, hop_length=256)
-                    audio_decoded = mel_to_audio(decoded_features_np, n_fft=1024, hop_length=256)
+                #     # 调用 librosa 的 mel_to_audio 函数
+                #     audio_original = mel_to_audio(mel_spec_np, n_fft=1024, hop_length=256)
+                #     audio_decoded = mel_to_audio(decoded_features_np, n_fft=1024, hop_length=256)
 
-                    # 添加到 TensorBoard
-                    writer.add_audio('Original/audio', audio_original, global_step=epoch, sample_rate=44100)
-                    writer.add_audio('Decoded/audio', audio_decoded, global_step=epoch, sample_rate=44100)
+                #     # 添加到 TensorBoard
+                #     writer.add_audio('Original/audio', audio_original, global_step=epoch, sample_rate=24000)
+                #     writer.add_audio('Decoded/audio', audio_decoded, global_step=epoch, sample_rate=24000)
 
     val_loss_mse /= len(val_loader)  # 计算平均验证MSE损失
     val_loss_l1 /= len(val_loader)  # 计算平均验证L1损失

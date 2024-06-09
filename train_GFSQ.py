@@ -69,10 +69,11 @@ class AudioDataset(Dataset):
         return mel_spectrogram
     def load_mel_spectrogram(self, file_path):
         # 加载音频文件并转换为Mel谱图
-        waveform, _ = librosa.load(file_path, sr=44100, mono=True)
-        audio = torch.from_numpy(waveform)
-        mel_spectrogram = self.mel_spectrogram(audio)
-        return mel_spectrogram.squeeze(0)
+        waveform, sr = librosa.load(file_path, sr=self.sample_rate, mono=True)
+        S = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128,n_fft=1024,hop_length=256,)
+        return torch.from_numpy(S)
+    
+
 
 
 # In[ ]:
@@ -119,9 +120,9 @@ def dynamic_collate_fn(batch):
 
 
 model_params = {
-    "WaveNet": {"input_channels": 128, "output_channels": 768, 'residual_layers': 20, 'dilation_cycle': 4},
-    "GFSQ": {"dim": 768, "levels": [8, 5, 5, 5], "G": 2, "R": 2},
-    "DVAEDecoder": {"idim": 768, "odim": 128}
+    "WaveNet": {"input_channels": 128, "output_channels": 1024, 'residual_layers': 20, 'dilation_cycle': 4},
+    "GFSQ": {"dim": 1024, "levels": [8, 5, 5, 5], "G": 2, "R": 2},
+    "DVAEDecoder": {"idim": 1024, "odim": 128, "n_layer":12, "bn_dim": 128, "hidden":512}
 }
 
 
@@ -176,7 +177,7 @@ accumulation_steps = 8
 # In[ ]:
 
 
-root_dir = "/root/autodl-tmp/audio/"
+root_dir = "/tmp/three_moon"
 audio_files = get_audio_files(root_dir)
 dataset = AudioDataset(audio_files)
 
@@ -186,22 +187,23 @@ dataset = AudioDataset(audio_files)
 # In[ ]:
 
 
-train_size = int(0.8 * len(dataset))
+train_size = int(0.9 * len(dataset))
 val_size = len(dataset) - train_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
-
-# In[ ]:
-
-
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=dynamic_collate_fn, )
-val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, collate_fn=dynamic_collate_fn, )
-
-
-# In[ ]:
-
-
 logger.info(f"Train size: {len(train_dataset)} \t Val size: {len(val_dataset)}")
+
+
+# In[ ]:
+
+
+if 'cuda' in str(device):
+    batch_size = 8
+else:
+    batch_size = 1
+
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=dynamic_collate_fn, )
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=dynamic_collate_fn, )
 
 
 # 查找是否有记录点
@@ -278,9 +280,9 @@ for epoch in range(start_epoch, num_epochs):
         with autocast():
             features = wavenet(mel_spectrogram)  # 通过WaveNet提取特征
             _, quantized_features, _, _, quantized_indices = gfsq(features)  # 通过GFSQ量化特征
-            quantized_features = quantized_features.transpose(1, 2)  # 转置量化特征以适应解码器输入
+            # quantized_features = quantized_features.transpose(1, 2)  # 转置量化特征以适应解码器输入 
             decoded_features = decoder(quantized_features)  # 通过DVAEDecoder解码特征
-            decoded_features = decoded_features.transpose(1, 2)  # 转置解码后的特征以匹配原始mel谱图
+            # decoded_features = decoded_features.transpose(1, 2)  # 转置解码后的特征以匹配原始mel谱图
 
             # 计算损失
             loss = criterion(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的均方误差损失
@@ -326,9 +328,9 @@ for epoch in range(start_epoch, num_epochs):
             with autocast():
                 features = wavenet(mel_spectrogram)  # 通过WaveNet提取特征
                 _, quantized_features, _, _, quantized_indices = gfsq(features)  # 通过GFSQ量化特征
-                quantized_features = quantized_features.transpose(1, 2)  # 转置量化特征以适应解码器输入
+
                 decoded_features = decoder(quantized_features)  # 通过DVAEDecoder解码特征
-                decoded_features = decoded_features.transpose(1, 2)  # 转置解码后的特征以匹配原始mel谱图
+
 
                 # 计算MSE损失
                 loss_mse = criterion(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的均方误差损失

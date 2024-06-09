@@ -149,6 +149,7 @@ class DVAEDecoder(nn.Module):
         # B, T, C
         # # 首先对输入进行转置以匹配预期的维度（批次、通道、序列长度）。
         # x = input.transpose(1, 2)
+        x = input
         # 它通过 conv_in 进行初始处理。 
         x = self.conv_in(x)
         # 使用额外的调节数据按顺序处理 conv_in 的输出。

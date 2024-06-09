@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 #!/usr/bin/env python
 # coding: utf-8
 
 
-# In[ ]:
+# In[2]:
 
 
 import torch
@@ -30,7 +30,7 @@ from torch.cuda.amp import autocast, GradScaler
 
 # 设置设备，优先使用CUDA，其次是MPS（Mac上的GPU加速），最后是CPU
 
-# In[ ]:
+# In[3]:
 
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
@@ -42,7 +42,7 @@ log_dir = "runs/experiment1"  # 指定日志目录
 writer = SummaryWriter(log_dir=log_dir)
 
 
-# In[ ]:
+# In[4]:
 
 
 class AudioDataset(Dataset):
@@ -76,7 +76,7 @@ class AudioDataset(Dataset):
 
 
 
-# In[ ]:
+# In[5]:
 
 
 def get_audio_files(root_dir):
@@ -93,7 +93,7 @@ def get_audio_files(root_dir):
     return audio_files
 
 
-# In[ ]:
+# In[6]:
 
 
 def dynamic_collate_fn(batch):
@@ -116,7 +116,7 @@ def dynamic_collate_fn(batch):
 
 # 初始化模型参数
 
-# In[ ]:
+# In[7]:
 
 
 model_params = {
@@ -128,7 +128,7 @@ model_params = {
 
 # 实例化模型
 
-# In[ ]:
+# In[8]:
 
 
 wavenet = WaveNet(**model_params["WaveNet"]).to(device)
@@ -138,11 +138,14 @@ decoder = DVAEDecoder(**model_params["DVAEDecoder"]).to(device)
 
 # 定义损失函数和优化器
 
-# In[ ]:
+# In[9]:
 
 
-criterion = nn.MSELoss()
-# optimizer = optim.Adam(list(wavenet.parameters()) + list(gfsq.parameters()) + list(decoder.parameters()), lr=1e-3) # 调整学习率
+loss_type = 'L1'
+if loss_type == 'MSE':
+    criterion = nn.MSELoss()
+else:
+    criterion = nn.L1Loss()
 
 optimizer = optim.Adam(
     list(wavenet.parameters()) + list(gfsq.parameters()) + list(decoder.parameters()), 
@@ -153,7 +156,7 @@ optimizer = optim.Adam(
 
 # 使用学习率调度器
 
-# In[ ]:
+# In[10]:
 
 
 # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # 调整调度器参数
@@ -166,7 +169,7 @@ scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min
 
 # 梯度累积设置
 
-# In[ ]:
+# In[11]:
 
 
 accumulation_steps = 8
@@ -174,7 +177,7 @@ accumulation_steps = 8
 
 # 加载数据集并拆分为训练集和验证集
 
-# In[ ]:
+# In[12]:
 
 
 root_dir = "/tmp/three_moon"
@@ -184,7 +187,7 @@ dataset = AudioDataset(audio_files)
 
 # 切割分成训练集和校验集
 
-# In[ ]:
+# In[13]:
 
 
 train_size = int(0.9 * len(dataset))
@@ -193,7 +196,7 @@ train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 logger.info(f"Train size: {len(train_dataset)} \t Val size: {len(val_dataset)}")
 
 
-# In[ ]:
+# In[14]:
 
 
 if 'cuda' in str(device):
@@ -208,7 +211,7 @@ val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, colla
 
 # 查找是否有记录点
 
-# In[ ]:
+# In[15]:
 
 
 import glob  # 用于查找模型文件
@@ -216,7 +219,7 @@ import glob  # 用于查找模型文件
 
 # 定义 resume 变量
 
-# In[ ]:
+# In[16]:
 
 
 resume = True  # 如果需要从最新检查点恢复训练，则设置为 True
@@ -224,7 +227,7 @@ resume = True  # 如果需要从最新检查点恢复训练，则设置为 True
 
 # 获取最新的检查点
 
-# In[ ]:
+# In[17]:
 
 
 def convert_state_dict_to_float(state_dict):
@@ -259,9 +262,27 @@ else:
 scaler = GradScaler()
 
 
+# In[18]:
+
+
+import librosa
+import numpy as np
+import torch
+
+def mel_to_audio(mel_spectrogram, sr=44100, n_fft=1024, hop_length=256, win_length=None):
+    """将 Mel 频谱图转换回音频信号"""
+    # 确保输入为 NumPy 数组
+    if isinstance(mel_spectrogram, torch.Tensor):
+        mel_spectrogram = mel_spectrogram.cpu().numpy()
+    
+    # 使用 librosa 的功能进行逆 Mel 频谱变换
+    mel_decompress = librosa.feature.inverse.mel_to_audio(mel_spectrogram, sr=sr, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+    return mel_decompress
+
+
 # 训练循环
 
-# In[ ]:
+# In[19]:
 
 
 # 训练循环
@@ -280,9 +301,7 @@ for epoch in range(start_epoch, num_epochs):
         with autocast():
             features = wavenet(mel_spectrogram)  # 通过WaveNet提取特征
             _, quantized_features, _, _, quantized_indices = gfsq(features)  # 通过GFSQ量化特征
-            # quantized_features = quantized_features.transpose(1, 2)  # 转置量化特征以适应解码器输入 
             decoded_features = decoder(quantized_features)  # 通过DVAEDecoder解码特征
-            # decoded_features = decoded_features.transpose(1, 2)  # 转置解码后的特征以匹配原始mel谱图
 
             # 计算损失
             loss = criterion(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的均方误差损失
@@ -293,7 +312,7 @@ for epoch in range(start_epoch, num_epochs):
             # optimizer.step()  # 每 accumulation_steps 步更新一次模型参数
             scaler.step(optimizer)
             scaler.update()
-            # optimizer.zero_grad()
+            optimizer.zero_grad()
 
         # 打印每100 steps的信息
         if (i + 1) % 100 == 0:
@@ -312,7 +331,7 @@ for epoch in range(start_epoch, num_epochs):
                 'scaler_state_dict': scaler.state_dict(),  # 保存 GradScaler 状态
             }, checkpoint_path)
             logger.info(f"Model saved to {checkpoint_path}")
-        i += 1
+        i += 1   # 更新迭代计数器
 
     scheduler.step()  # 每个epoch结束后更新学习率
 
@@ -323,22 +342,34 @@ for epoch in range(start_epoch, num_epochs):
     val_loss_mse = 0  # 初始化验证MSE损失
     val_loss_l1 = 0  # 初始化验证L1损失
     with torch.no_grad():  # 禁用梯度计算
-        for mel_spectrogram in val_loader:
+        for batch_index, mel_spectrogram in enumerate(val_loader):
             mel_spectrogram = mel_spectrogram.to(device)  # 将mel谱图数据移动到指定设备
             with autocast():
                 features = wavenet(mel_spectrogram)  # 通过WaveNet提取特征
                 _, quantized_features, _, _, quantized_indices = gfsq(features)  # 通过GFSQ量化特征
-
                 decoded_features = decoder(quantized_features)  # 通过DVAEDecoder解码特征
-
-
+                
                 # 计算MSE损失
-                loss_mse = criterion(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的均方误差损失
+                loss_mse = F.mse_loss(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的均方误差损失
                 val_loss_mse += loss_mse.item()  # 累加验证MSE损失
 
                 # 计算L1损失
                 loss_l1 = F.l1_loss(decoded_features, mel_spectrogram)  # 计算解码后的特征与原始mel谱图之间的L1损失
                 val_loss_l1 += loss_l1.item()  # 累加验证L1损失
+
+                # 仅在每个 epoch 的第一个 batch 上进行音频解码和可视化
+                if batch_index == 0:
+                    # 解码回音频
+                    mel_spec_np = mel_spectrogram[0].cpu().numpy()
+                    decoded_features_np = decoded_features[0].cpu().numpy()
+
+                    # 调用 librosa 的 mel_to_audio 函数
+                    audio_original = mel_to_audio(mel_spec_np, n_fft=1024, hop_length=256)
+                    audio_decoded = mel_to_audio(decoded_features_np, n_fft=1024, hop_length=256)
+
+                    # 添加到 TensorBoard
+                    writer.add_audio('Original/audio', audio_original, global_step=epoch, sample_rate=44100)
+                    writer.add_audio('Decoded/audio', audio_decoded, global_step=epoch, sample_rate=44100)
 
     val_loss_mse /= len(val_loader)  # 计算平均验证MSE损失
     val_loss_l1 /= len(val_loader)  # 计算平均验证L1损失

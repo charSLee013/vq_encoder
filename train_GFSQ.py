@@ -26,6 +26,7 @@ import torchaudio
 from torch.utils.data import random_split
 import logging
 from torch.cuda.amp import autocast, GradScaler
+from modules.feature_extractors import MelSpectrogramFeatures
 
 
 # 设置设备，优先使用CUDA，其次是MPS（Mac上的GPU加速），最后是CPU
@@ -46,19 +47,11 @@ writer = SummaryWriter(log_dir=log_dir)
 
 
 class AudioDataset(Dataset):
-    def __init__(self, audio_files, sample_rate=44100):
+    def __init__(self, audio_files, sample_rate=44100,n_fft =1024,hop_length=256,n_mels=100):
         # 初始化音频文件列表和Mel谱图转换器
         self.audio_files = audio_files
-        # self.mel_spec = LogMelSpectrogram(
-        #     sample_rate=44100,
-        #     n_fft=2048,
-        #     win_length=2048,
-        #     hop_length=512,
-        #     n_mels=128,
-        #     f_min=0.0,
-        #     f_max=8000.0,
-        # )
-        self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(sample_rate=sample_rate)
+        # self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(sample_rate=sample_rate)
+        self.mel_spectrogram = MelSpectrogramFeatures(sample_rate=sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
         self.sample_rate = sample_rate
     def __len__(self):
         # 返回数据集中的音频文件数量
@@ -67,13 +60,20 @@ class AudioDataset(Dataset):
         # 加载并返回指定索引的音频文件的Mel谱图
         mel_spectrogram = self.load_mel_spectrogram(self.audio_files[idx])
         return mel_spectrogram
+    # def load_mel_spectrogram(self, file_path):
+    #     # 加载音频文件并转换为Mel谱图
+    #     waveform, sr = librosa.load(file_path, sr=self.sample_rate, mono=True)
+    #     S = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128,n_fft=1024,hop_length=256,)
+    #     return torch.from_numpy(S)
     def load_mel_spectrogram(self, file_path):
         # 加载音频文件并转换为Mel谱图
-        waveform, sr = librosa.load(file_path, sr=self.sample_rate, mono=True)
-        S = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128,n_fft=1024,hop_length=256,)
-        return torch.from_numpy(S)
-    
-
+        waveform, sr = torchaudio.load(file_path)
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0)
+        if sr != self.sample_rate:
+            waveform = torchaudio.transforms.Resample(sr, self.sample_rate)(waveform)
+        mel_spectrogram = self.mel_spectrogram(waveform)
+        return mel_spectrogram[0]
 
 
 # In[5]:
@@ -97,6 +97,13 @@ def get_audio_files(root_dir):
 
 
 def dynamic_collate_fn(batch):
+    # Filter out tensors that do not have 2 dimensions
+    batch = [tensor for tensor in batch if len(tensor.shape) == 2]
+
+    # Ensure the batch is not empty after filtering
+    if len(batch) == 0:
+        raise ValueError("All tensors in the batch were skipped. Check your data preprocessing.")
+    
     # 按照音频长度排序
     batch.sort(key=lambda x: x.shape[1], reverse=True)
     max_len = batch[0].shape[1]
@@ -120,9 +127,9 @@ def dynamic_collate_fn(batch):
 
 
 model_params = {
-    "WaveNet": {"input_channels": 128, "output_channels": 1024, 'residual_layers': 20, 'dilation_cycle': 4},
+    "WaveNet": {"input_channels": 100, "output_channels": 1024, 'residual_layers': 20, 'dilation_cycle': 4},
     "GFSQ": {"dim": 1024, "levels": [8, 5, 5, 5], "G": 2, "R": 2},
-    "DVAEDecoder": {"idim": 1024, "odim": 128, "n_layer":12, "bn_dim": 128, "hidden":512}
+    "DVAEDecoder": {"idim": 1024, "odim": 100, "n_layer":12, "bn_dim": 128, "hidden":512}
 }
 
 
@@ -141,7 +148,7 @@ decoder = DVAEDecoder(**model_params["DVAEDecoder"]).to(device)
 # In[9]:
 
 
-loss_type = 'L1'
+loss_type = 'MSE'
 if loss_type == 'MSE':
     criterion = nn.MSELoss()
 else:
@@ -190,7 +197,7 @@ dataset = AudioDataset(audio_files)
 # In[13]:
 
 
-train_size = int(0.9 * len(dataset))
+train_size = int(0.95 * len(dataset))
 val_size = len(dataset) - train_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 logger.info(f"Train size: {len(train_dataset)} \t Val size: {len(val_dataset)}")
@@ -203,7 +210,6 @@ if 'cuda' in str(device):
     batch_size = 8
 else:
     batch_size = 1
-
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=dynamic_collate_fn, )
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=dynamic_collate_fn, )

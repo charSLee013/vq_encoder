@@ -143,12 +143,12 @@ class DVAEDecoder(nn.Module):
             for _ in range(n_layer)])
         # 最后一个解码器块的输出通过卷积层（conv_out）转换为最终音频信号。
         # 该层将处理后的特征映射回原始音频空间（或与其非常相似的空间）。
-        self.conv_out = nn.Conv1d(hidden, odim, kernel_size=1, bias=False)
+        self.conv_out = nn.Conv1d(hidden, odim, kernel_size=3,stride=1,padding=1,dilation=1 ,bias=False)
 
     def forward(self, input, conditioning=None):
         # B, T, C
-        # 首先对输入进行转置以匹配预期的维度（批次、通道、序列长度）。
-        x = input.transpose(1, 2)
+        # # 首先对输入进行转置以匹配预期的维度（批次、通道、序列长度）。
+        # x = input.transpose(1, 2)
         # 它通过 conv_in 进行初始处理。 
         x = self.conv_in(x)
         # 使用额外的调节数据按顺序处理 conv_in 的输出。
@@ -156,8 +156,9 @@ class DVAEDecoder(nn.Module):
             x = f(x, conditioning)
         # 最后，最后一个解码器块的输出通过 conv_out 传递
         x = self.conv_out(x)
-        # 并将结果转置回原始维度。
-        return x.transpose(1, 2)
+        # # 并将结果转置回原始维度。
+        # return x.transpose(1, 2)
+        return x
 
 
 class DVAE(nn.Module):

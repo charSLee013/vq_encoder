@@ -18,7 +18,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from modules.wavenet import WaveNet
 from modules.dvae import GFSQ, DVAEDecoder
-from modules.spectrogram import LogMelSpectrogram
 import os
 from torch.utils.tensorboard import SummaryWriter
 import librosa
@@ -127,9 +126,9 @@ def dynamic_collate_fn(batch):
 
 
 model_params = {
-    "WaveNet": {"input_channels": 100, "output_channels": 1024, 'residual_layers': 20, 'dilation_cycle': 4},
-    "GFSQ": {"dim": 1024, "levels": [8, 5, 5, 5], "G": 2, "R": 2},
-    "DVAEDecoder": {"idim": 1024, "odim": 100, "n_layer":12, "bn_dim": 128, "hidden":512}
+    "WaveNet": {"input_channels": 100, "output_channels": 512, 'residual_layers': 10, 'dilation_cycle': 4, 'residual_channels':256,},
+    "GFSQ": {"dim": 512, "levels": [5,5,5,5], "G": 2, "R": 2},
+    "DVAEDecoder": {"idim": 512, "odim": 100, "n_layer":12, "bn_dim": 128, "hidden":256}
 }
 
 
@@ -288,7 +287,7 @@ def mel_to_audio(mel_spectrogram, sr=24000, n_fft=1024, hop_length=256, win_leng
 
 # 训练循环
 
-# In[19]:
+# In[20]:
 
 
 # 训练循环

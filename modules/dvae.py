@@ -213,3 +213,44 @@ class DVAE(nn.Module):
         mel = dec_out * self.coef
 
         return mel
+
+
+class DVAEEncoder(nn.Module):
+    """仅做参考
+    """
+    def __init__(self, input_dim, hidden_dim, lstm_layers, output_dim, dropout):
+        super(DVAEEncoder, self).__init__()
+
+        # CNN for local feature extraction
+        self.cnn = nn.Sequential(
+            nn.Conv1d(input_dim, hidden_dim, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Dropout(dropout),
+            nn.Conv1d(hidden_dim, hidden_dim * 2, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(hidden_dim * 2),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.Dropout(dropout)
+        )
+
+        # LSTM for capturing long-term dependencies
+        self.lstm = nn.LSTM(input_size=hidden_dim * 2, hidden_size=hidden_dim * 2, num_layers=lstm_layers, batch_first=True, bidirectional=True)
+        
+        # Fully connected layers for style embedding
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_dim * 4, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, output_dim)
+        )
+
+    def forward(self, x):
+        # x shape: [batch_size, input_dim, time_steps]
+        x = self.cnn(x)
+        x = x.permute(0, 2, 1)  # reshape to [batch_size, time_steps, hidden_dim * 2]
+        x, _ = self.lstm(x)
+        x = x[:, -1, :]  # take the last output of LSTM as the sequence representation
+        x = self.fc(x)
+        return x

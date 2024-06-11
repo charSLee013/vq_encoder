@@ -44,7 +44,10 @@ class MelSpectrogramFeatures(FeatureExtractor):
         if self.padding == "same":
             pad = self.mel_spec.win_length - self.mel_spec.hop_length
             audio = torch.nn.functional.pad(audio, (pad // 2, pad // 2), mode="reflect")
-        mel = self.mel_spec(audio)
+        # fix bug if in mps device
+        if audio.device.type == "mps" or audio.device.type == "cpu":
+            self.mel_spec = self.mel_spec.to('cpu')
+        mel = self.mel_spec(audio).to(audio.device.type)
         features = safe_log(mel)
         return features
 

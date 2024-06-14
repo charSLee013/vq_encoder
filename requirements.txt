@@ -1,0 +1,4 @@
+encodec
+vocos
+vector-quantize-pytorch
+librosa

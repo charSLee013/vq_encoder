@@ -31,9 +31,17 @@ class Discriminator(nn.Module):
                 blocks.append(nn.SiLU(inplace=True))
 
         self.blocks = nn.Sequential(*blocks)
+        self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))  # 添加全局自适应平均池化
+        self.fc = nn.Linear(1, 1)  # 添加全连接层
+        self.sigmoid = nn.Sigmoid()  # 添加Sigmoid激活函数
 
     def forward(self, x):
-        return self.blocks(x[:, None])[:, 0]
+        x = self.blocks(x[:, None])
+        x = self.global_pooling(x)  # 应用全局自适应平均池化
+        x = x.view(x.size(0), -1)  # 将池化后的张量展平
+        x = self.fc(x)  # 通过全连接层
+        output = self.sigmoid(x)  # 应用Sigmoid激活函数输出概率
+        return output.squeeze()
 
 """AdaptiveAvgPool2d 的工作原理：
 自适应：意味着该层会根据输入的实际尺寸动态调整池化窗口的大小，以达到指定的输出尺寸。与之相对的是固定大小的池化层（如AvgPool2d），后者要求预先设定固定的窗口尺寸。
@@ -56,7 +64,7 @@ class DynamicAudioDiscriminator(nn.Module):
         super(DynamicAudioDiscriminator, self).__init__()
         
         self.conv_blocks = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0)),  # 考虑num_mels调整卷积核大小
+            nn.Conv2d(1, 64, kernel_size=(5, num_mels), stride=(2, 1), padding=(2, 1)),  # 考虑num_mels调整卷积核大小
             nn.LeakyReLU(0.2),
             nn.Conv2d(64, 128, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0)),
             nn.BatchNorm2d(128),
@@ -85,16 +93,77 @@ class DynamicAudioDiscriminator(nn.Module):
         x = self.fc(x)
         output = self.sigmoid(x)
         return output.squeeze()
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.LeakyReLU(0.2)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        if in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(out_channels)
+            )
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x):
+        residual = x
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x += self.shortcut(residual)  # 残差连接
+        x = self.relu(x)  # 再次应用激活函数
+        return x
+
+class DynamicAudioDiscriminatorWithResidual(nn.Module):
+    def __init__(self, num_mels=100):
+        super(DynamicAudioDiscriminatorWithResidual, self).__init__()
+        
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=(3, 9), stride=1, padding=(1, 4))
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.LeakyReLU(0.2)
+        
+        self.res_blocks = nn.Sequential(
+            ResidualBlock(64, 128, (5, 1), (2, 1), (2, 0)),
+            ResidualBlock(128, 256, (5, 1), (2, 1), (2, 0)),
+            ResidualBlock(256, 512, (5, 1), (2, 1), (2, 0)),
+            # ResidualBlock(512, 1024, (5, 1), (2, 1), (2, 0)),
+        )
+        # 根据最后一个残差块的输出通道数动态设置全连接层
+        last_res_block_out_channels = self.res_blocks[-1].conv2.out_channels  # 获取最后一个残差块的输出通道数
+        self.fc = nn.Linear(last_res_block_out_channels, 1)  # 设置全连接层
+        self.global_pooling = nn.AdaptiveAvgPool2d((1, 1))
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        
+        x = self.res_blocks(x)
+        
+        x = self.global_pooling(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        output = self.sigmoid(x)
+        return output.squeeze()
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def run_demo(device):
+def run_demo(model:torch.nn.Module,device):
     # 定义模型并转移到设备
-    discriminator = DynamicAudioDiscriminator(num_mels=100).to(device)
+    discriminator = model.to(device)
 
     # 准备测试数据并转移到设备
     batch_size = 8
-    time_steps = random.randint(100,1024)
+    time_steps = 99
     random_data = torch.randn(batch_size, 100, time_steps, device=device)
 
     # 将模型设置为评估模式
@@ -115,5 +184,12 @@ if __name__ == "__main__":
     # x = torch.randn(8, 100, 1024)
     # y = model(x)
     # print(y.shape)
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-    run_demo(device)
+    # print(y)
+    # device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = 'cpu'
+    model = Discriminator()
+    run_demo(model,device)
+    model = DynamicAudioDiscriminator()
+    run_demo(model,device)
+    model = DynamicAudioDiscriminatorWithResidual()
+    run_demo(model,device)

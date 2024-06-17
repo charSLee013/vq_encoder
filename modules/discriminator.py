@@ -152,8 +152,9 @@ class DynamicAudioDiscriminatorWithResidual(nn.Module):
         x = self.global_pooling(x)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
-        output = self.sigmoid(x)
-        return output.squeeze()
+        # output = self.sigmoid(x)
+        # return output.squeeze()
+        return x
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 

@@ -196,3 +196,6 @@ Temporary Items
 .apdisk
 
 checkpoint_epoch_*.pth
+train_rvc/
+lightning_logs/
+train_rvc

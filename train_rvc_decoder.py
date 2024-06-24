@@ -3,7 +3,7 @@
 
 # ## 将通过RVC换声后的音频数据用来训练Decoder解码器以实现音色固定的效果
 
-# In[ ]:
+# In[1]:
 
 
 import torch
@@ -11,7 +11,7 @@ from torch.nn.functional import pad
 
 def collate_fn(batch):
     """
-    Custom collate function with hidden transposed and shaphttps://www.youtube.com/watch?v=_e2E12159kes maintained throughout.
+    Custom collate function with hidden transposed and shapes maintained throughout.
     
     Args:
         batch (List[Tuple[Tensor, Tensor]]): List of tuples, each containing a pair of hidden and log_mel_spec tensors.
@@ -38,7 +38,7 @@ def collate_fn(batch):
     }
 
 
-# In[ ]:
+# In[2]:
 
 
 import torch
@@ -51,15 +51,14 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'mps' if torch.
     
 if 'mps' in str(device):
     os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] ='1'
-
-# 在jupyter notebook 里面还需要额外引入一个魔法命令
-try:
-    # 只在jupyter notebook中运行
-    from IPython import get_ipython
-    if get_ipython() is not None:
-        get_ipython().run_line_magic('set_env', 'PYTORCH_ENABLE_MPS_FALLBACK=1')
-except:
-    pass
+    # 在jupyter notebook 里面还需要额外引入一个魔法命令
+    try:
+        # 只在jupyter notebook中运行
+        from IPython import get_ipython
+        if get_ipython() is not None:
+            get_ipython().run_line_magic('set_env', 'PYTORCH_ENABLE_MPS_FALLBACK=1')
+    except:
+        pass
 
 class MelSpecDataset(Dataset):
     def __init__(self, data_dir):
@@ -86,7 +85,7 @@ class MelSpecDataset(Dataset):
         return hidden, log_mel_spec
 
 
-# In[ ]:
+# In[3]:
 
 
 from modules.dvae import DVAEDecoder
@@ -95,7 +94,8 @@ from torch.optim import Adam
 from torch.nn import MSELoss, L1Loss
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
-
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from pytorch_lightning.loggers import TensorBoardLogger
 
 class LightningDVAEDecoder(pl.LightningModule):
     def __init__(self, idim, odim, n_layer=12, bn_dim=64, hidden=256, kernel=7, dilation=2, up=False):
@@ -143,24 +143,26 @@ class LightningDVAEDecoder(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=1e-3)  # 你可以根据需求调整学习率和其他参数
 
-        # 添加学习率调度器
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=10, gamma=0.1)  # 每10个epoch学习率降低为原来的0.1
-        # 返回optimizer和scheduler的字典，告诉PyTorch Lightning在训练过程中如何使用它们
+        scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-8) 
+
+        # 返回optimizer和scheduler的字典给PyTorch Lightning
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",  # 调度器的间隔单位是epoch
-                "frequency": 1,       # 每个epoch后调用一次
-                "monitor": "val_loss",  # 监控的指标，用于决定是否调整学习率（这里是验证损失）
-                "strict": True         # 如果监控的指标在日志中找不到，则抛出异常
+                "interval": "epoch",
+                "frequency": 1,  # 由于CosineAnnealingLR通常是每个epoch更新，所以frequency为1
+                "monitor": "val_loss",  # 仍然监控验证损失来决定是否调整学习率
+                "strict": True
             }
         }
 
 
 # In[ ]:
 
+
+# Faster, but less precise
+torch.set_float32_matmul_precision("high")
 
 # 使用自定义的 Dataset 类
 dataset = MelSpecDataset("./train_rvc")
@@ -179,15 +181,15 @@ train_size = len(dataset) - val_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
 if 'cuda' in str(device):
-    batch_size = 8
+    batch_size = 24
 else:
     batch_size = 4
 
 # 创建 DataLoader 以批量加载数据
 train_loader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,num_workers=8)
 val_loader = torch.utils.data.DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,num_workers=8)
 
 # 打印数量
 print(f"Train dataset size: {len(train_dataset)}")
@@ -197,7 +199,7 @@ print(f"Validation dataset size: {len(val_dataset)}")
 IDIM = 384
 ODIM = 100
 model = LightningDVAEDecoder(
-    idim=IDIM, odim=ODIM, hidden=512, n_layer=12, bn_dim=128)
+    idim=IDIM, odim=ODIM, bn_dim=64, hidden=256, n_layer=8,)
 
 # 自定义检查点保存的目录
 checkpoint_dir = './checkpoints'
@@ -222,7 +224,7 @@ checkpoint_callback = ModelCheckpoint(
     # every_n_epochs=1,    # 每个 epoch 保存一次模型
     filename='model-{epoch:02d}-{val_loss:.4f}',  # 模型文件名的格式
     auto_insert_metric_name=False,  # 不自动在文件名中插入监控的指标名,
-    every_n_train_steps=1000,  # save checkpoints every 2000 steps
+    every_n_train_steps=2000,  # save checkpoints every 2000 steps
     dirpath=checkpoint_dir,
 )
 
@@ -235,13 +237,20 @@ early_stop_callback = pl.callbacks.EarlyStopping(
     mode='min'         # 监控指标的模式，这里是最小化验证损失
 )
 
+# 设置TensorBoard日志存储的根目录
+tb_logger = TensorBoardLogger(save_dir="./tensorboard/",log_graph=False,default_hp_metric=True,name=None,version=None)
+
 # 初始化 PyTorch Lightning Trainer
-max_epochs = 100 
+max_epochs = 1000
 trainer = pl.Trainer(max_epochs=max_epochs, 
                      accelerator="auto", 
                      devices="auto",
-                     callbacks=[checkpoint_callback, early_stop_callback],)
+                     callbacks=[checkpoint_callback, early_stop_callback],
+                        precision="16-mixed",  # 这一行开启了混合精度训练
+                     logger=tb_logger,  # 这里指定了TensorBoard日志记录器
+                    )
 
 # 开始训练
+last_checkpoint_path = None # 暂时不从检查点恢复
 trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader,ckpt_path = last_checkpoint_path)
 

@@ -120,8 +120,8 @@ class ParralelBlock(nn.Module):
     def __init__(
         self,
         channels: int,
-        kernel_sizes: tuple[int] = (3, 7, 11),
-        dilation_sizes: tuple[tuple[int]] = ((1, 3, 5), (1, 3, 5), (1, 3, 5)),
+        kernel_sizes = (3, 7, 11),
+        dilation_sizes= ((1, 3, 5), (1, 3, 5), (1, 3, 5)),
     ):
         super().__init__()
 
@@ -144,10 +144,10 @@ class HiFiGANGenerator(nn.Module):
         self,
         *,
         hop_length: int = 512,
-        upsample_rates: tuple[int] = (8, 8, 2, 2, 2),
-        upsample_kernel_sizes: tuple[int] = (16, 16, 8, 2, 2),
-        resblock_kernel_sizes: tuple[int] = (3, 7, 11),
-        resblock_dilation_sizes: tuple[tuple[int]] = ((1, 3, 5), (1, 3, 5), (1, 3, 5)),
+        upsample_rates = (8, 8, 2, 2, 2),
+        upsample_kernel_sizes = (16, 16, 8, 2, 2),
+        resblock_kernel_sizes = (3, 7, 11),
+        resblock_dilation_sizes = ((1, 3, 5), (1, 3, 5), (1, 3, 5)),
         num_mels: int = 128,
         upsample_initial_channel: int = 512,
         use_template: bool = True,
@@ -407,8 +407,8 @@ class ConvNeXtEncoder(nn.Module):
     def __init__(
         self,
         input_channels: int = 3,
-        depths: list[int] = [3, 3, 9, 3],
-        dims: list[int] = [96, 192, 384, 768],
+        depths = [3, 3, 9, 3],
+        dims = [96, 192, 384, 768],
         drop_path_rate: float = 0.0,
         layer_scale_init_value: float = 1e-6,
         kernel_size: int = 7,

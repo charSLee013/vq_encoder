@@ -24,9 +24,9 @@ class DownsampleFiniteScalarQuantize(nn.Module):
         input_dim: int = 512,       # 输入特征的维度
         n_codebooks: int = 9,       # 量化器的码本数量
         n_groups: int = 1,          # 量化器的组数
-        levels: tuple[int] = (8, 5, 5, 5),  # Approximate 2**10 # 量化器的层级
-        downsample_factor: tuple[int] = (2, 2), # 下采样因子
-        downsample_dims: tuple[int] | None = None,  # 下采样维度
+        levels = (8, 5, 5, 5),  # Approximate 2**10 # 量化器的层级
+        downsample_factor = (2, 2), # 下采样因子
+        downsample_dims = None,  # 下采样维度
     ):
         super().__init__()
 

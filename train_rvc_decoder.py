@@ -95,11 +95,14 @@ from torch.nn import MSELoss, L1Loss
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from pytorch_lightning.loggers import TensorBoardLogger
+from modules.discriminator import DynamicAudioDiscriminatorWithResidual
 
 class LightningDVAEDecoder(pl.LightningModule):
     def __init__(self, idim, odim, n_layer=12, bn_dim=64, hidden=256, kernel=7, dilation=2, up=False):
         super().__init__()
+        self.save_hyperparameters()  # 这一行会自动保存模型的参数为超参数
         self.model = DVAEDecoder(
             idim, odim, n_layer, bn_dim, hidden, kernel, dilation, up)
         self.loss_fn = MSELoss()  # 假设我们使用均方误差作为损失函数
@@ -142,23 +145,34 @@ class LightningDVAEDecoder(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=1e-3)  # 你可以根据需求调整学习率和其他参数
-
-        scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-8) 
-
-        # 返回optimizer和scheduler的字典给PyTorch Lightning
+        # 余弦退火
+        scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=128, T_mult=2, eta_min=1e-6)
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
                 "interval": "epoch",
-                "frequency": 1,  # 由于CosineAnnealingLR通常是每个epoch更新，所以frequency为1
-                "monitor": "val_loss",  # 仍然监控验证损失来决定是否调整学习率
+                "frequency": 1,
+                "monitor": "val_loss",
                 "strict": True
             }
         }
+#         scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-6) 
+
+#         # 返回optimizer和scheduler的字典给PyTorch Lightning
+#         return {
+#             "optimizer": optimizer,
+#             "lr_scheduler": {
+#                 "scheduler": scheduler,
+#                 "interval": "epoch",
+#                 "frequency": 1,  # 由于CosineAnnealingLR通常是每个epoch更新，所以frequency为1
+#                 "monitor": "val_loss",  # 仍然监控验证损失来决定是否调整学习率
+#                 "strict": True
+#             }
+#         }
 
 
-# In[ ]:
+# In[4]:
 
 
 # Faster, but less precise
@@ -198,8 +212,14 @@ print(f"Validation dataset size: {len(val_dataset)}")
 # 实例化你的 Lightning 模型
 IDIM = 384
 ODIM = 100
-model = LightningDVAEDecoder(
-    idim=IDIM, odim=ODIM, bn_dim=64, hidden=256, n_layer=8,)
+model_params = {
+    'idim':IDIM, 
+    'odim':ODIM, 
+    'bn_dim':128,
+    'hidden':512,
+    'n_layer':12,
+}
+model = LightningDVAEDecoder(**model_params)
 
 # 自定义检查点保存的目录
 checkpoint_dir = './checkpoints'
@@ -231,7 +251,7 @@ checkpoint_callback = ModelCheckpoint(
 # 添加 EarlyStopping 回调，设置早停条件
 early_stop_callback = pl.callbacks.EarlyStopping(
     monitor='val_mse_loss',
-    min_delta=0.0001,  # 最小变化量，小于这个值的变化不会触发早停
+    min_delta=0.1,  # 最小变化量，小于这个值的变化不会触发早停
     patience=10,       # 在满足条件后，继续训练的 epoch 数
     verbose=True,      # 是否在控制台输出早停信息
     mode='min'         # 监控指标的模式，这里是最小化验证损失
@@ -242,13 +262,18 @@ tb_logger = TensorBoardLogger(save_dir="./tensorboard/",log_graph=False,default_
 
 # 初始化 PyTorch Lightning Trainer
 max_epochs = 1000
+callbacks = [checkpoint_callback] # 忽略早停法
 trainer = pl.Trainer(max_epochs=max_epochs, 
                      accelerator="auto", 
                      devices="auto",
-                     callbacks=[checkpoint_callback, early_stop_callback],
+                     # callbacks=[checkpoint_callback, early_stop_callback],
+                     callbacks=callbacks,
                         precision="16-mixed",  # 这一行开启了混合精度训练
                      logger=tb_logger,  # 这里指定了TensorBoard日志记录器
                     )
+
+# 正式开始训练之前打印参数
+print(f"model_params: {model_params}")
 
 # 开始训练
 last_checkpoint_path = None # 暂时不从检查点恢复

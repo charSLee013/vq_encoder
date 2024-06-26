@@ -172,7 +172,7 @@ class LightningDVAEDecoder(pl.LightningModule):
 #         }
 
 
-# In[4]:
+# In[ ]:
 
 
 # Faster, but less precise
@@ -195,15 +195,15 @@ train_size = len(dataset) - val_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
 if 'cuda' in str(device):
-    batch_size = 24
+    batch_size = 36
 else:
     batch_size = 4
 
 # 创建 DataLoader 以批量加载数据
 train_loader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,num_workers=8)
+    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,num_workers=4)
 val_loader = torch.utils.data.DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,num_workers=8)
+    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,num_workers=4)
 
 # 打印数量
 print(f"Train dataset size: {len(train_dataset)}")
@@ -216,8 +216,8 @@ model_params = {
     'idim':IDIM, 
     'odim':ODIM, 
     'bn_dim':128,
-    'hidden':512,
-    'n_layer':12,
+    'hidden':256,
+    'n_layer':4,
 }
 model = LightningDVAEDecoder(**model_params)
 

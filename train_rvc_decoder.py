@@ -31,10 +31,19 @@ def collate_fn(batch):
     hidden_padded = torch.stack([pad(h, (0, max_len_hidden - h.size(1)), value=0) for h in hidden_list_transposed])
     log_mel_spec_padded = torch.stack([pad(l, (0, max_len_log_mel_spec - l.size(1)), value=0) for l in log_mel_spec_list])
     
+    # Generate masks for log_mel_spec sequences
+    log_mel_spec_masks = []
+    for l in log_mel_spec_list:
+        mask = torch.ones(l.size(0), l.size(1), dtype=torch.bool)
+        mask = pad(mask, (0, max_len_log_mel_spec - l.size(1)), value=0)
+        log_mel_spec_masks.append(mask)
+    log_mel_spec_masks = torch.stack(log_mel_spec_masks)
+
     # Return a dictionary with padded tensors, hidden remains in its transposed state
     return {
         'hidden': hidden_padded,  # Already in the desired transposed shape
-        'log_mel_spec': log_mel_spec_padded
+        'log_mel_spec': log_mel_spec_padded,
+        'log_mel_spec_mask': log_mel_spec_masks,
     }
 
 
@@ -108,7 +117,7 @@ class LightningDVAEDecoder(pl.LightningModule):
         self.loss_fn = MSELoss()  # 假设我们使用均方误差作为损失函数
         self.l1_loss_fn = L1Loss()  # 使用 L1 损失作为辅助损失函数
 
-    def forward(self, vq_feats):
+    def preprocess(self,vq_feats:torch.Tensor) -> torch.Tensor:
         # 通过调整量化特征的维度来准备解码
         # 将特征沿着 dim=1 维度分成两部分，得到两个形状为 (1, 512, 121) 的张量。
         temp = torch.chunk(vq_feats, 2, dim=1)  # flatten trick :)
@@ -117,14 +126,22 @@ class LightningDVAEDecoder(pl.LightningModule):
         # 重新调整特征形状，得到 vq_feats 形状为 (1, 512, 242)
         vq_feats = temp.reshape(*temp.shape[:2], -1)
 
+        return vq_feats
+    def forward(self, vq_feats):
+        vq_feats = self.preprocess(vq_feats)
         return self.model(vq_feats)
 
     def training_step(self, batch, batch_idx):
         # 注意：这里直接使用collate_fn处理后的数据结构
         hidden, target = batch['hidden'], batch['log_mel_spec']
+        target_mask = batch['log_mel_spec_mask']
+
         output = self(hidden)
 
-        loss = self.loss_fn(output, target)
+        # Apply mask to output to zero out padded parts
+        output_masked = output * target_mask.float()
+
+        loss = self.loss_fn(output_masked, target)
         self.log('train_loss', loss, prog_bar=True, logger=True)
         return loss
 
@@ -157,22 +174,9 @@ class LightningDVAEDecoder(pl.LightningModule):
                 "strict": True
             }
         }
-#         scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-6) 
-
-#         # 返回optimizer和scheduler的字典给PyTorch Lightning
-#         return {
-#             "optimizer": optimizer,
-#             "lr_scheduler": {
-#                 "scheduler": scheduler,
-#                 "interval": "epoch",
-#                 "frequency": 1,  # 由于CosineAnnealingLR通常是每个epoch更新，所以frequency为1
-#                 "monitor": "val_loss",  # 仍然监控验证损失来决定是否调整学习率
-#                 "strict": True
-#             }
-#         }
 
 
-# In[ ]:
+# In[4]:
 
 
 # Faster, but less precise
@@ -197,13 +201,13 @@ train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 if 'cuda' in str(device):
     batch_size = 36
 else:
-    batch_size = 4
+    batch_size = 1
 
 # 创建 DataLoader 以批量加载数据
 train_loader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,num_workers=4)
+    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 val_loader = torch.utils.data.DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,num_workers=4)
+    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
 # 打印数量
 print(f"Train dataset size: {len(train_dataset)}")
@@ -217,7 +221,7 @@ model_params = {
     'odim':ODIM, 
     'bn_dim':128,
     'hidden':256,
-    'n_layer':4,
+    'n_layer':2,
 }
 model = LightningDVAEDecoder(**model_params)
 

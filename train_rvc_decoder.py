@@ -3,7 +3,7 @@
 
 # ## 将通过RVC换声后的音频数据用来训练Decoder解码器以实现音色固定的效果
 
-# In[1]:
+# In[ ]:
 
 
 import torch
@@ -47,7 +47,7 @@ def collate_fn(batch):
     }
 
 
-# In[2]:
+# In[ ]:
 
 
 import torch
@@ -94,10 +94,10 @@ class MelSpecDataset(Dataset):
         return hidden, log_mel_spec
 
 
-# In[3]:
+# In[ ]:
 
 
-from modules.dvae import DVAEDecoder
+from modules.dvae import GradualDVAEDecoder,ImprovedGradualDVAEDecoder
 import pytorch_lightning as pl
 from torch.optim import Adam
 from torch.nn import MSELoss, L1Loss
@@ -108,12 +108,12 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from pytorch_lightning.loggers import TensorBoardLogger
 from modules.discriminator import DynamicAudioDiscriminatorWithResidual
 
-class LightningDVAEDecoder(pl.LightningModule):
-    def __init__(self, idim, odim, n_layer=12, bn_dim=64, hidden=256, kernel=7, dilation=2, up=False):
+class LightningGradualDVAEDecoder(pl.LightningModule):
+    def __init__(self, idim, odim, n_layer=12, bn_dim=64, hidden=256, kernel=3, dilation=2):
         super().__init__()
         self.save_hyperparameters()  # 这一行会自动保存模型的参数为超参数
-        self.model = DVAEDecoder(
-            idim, odim, n_layer, bn_dim, hidden, kernel, dilation, up)
+        self.model = ImprovedGradualDVAEDecoder(
+            idim, odim, n_layer, bn_dim, hidden, kernel, dilation)
         self.loss_fn = MSELoss()  # 假设我们使用均方误差作为损失函数
         self.l1_loss_fn = L1Loss()  # 使用 L1 损失作为辅助损失函数
 
@@ -147,14 +147,19 @@ class LightningDVAEDecoder(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         hidden, target = batch['hidden'], batch['log_mel_spec']
+        target_mask = batch['log_mel_spec_mask']
+        
         output = self(hidden)
 
+        # Apply mask to output to zero out padded parts
+        output_masked = output * target_mask.float()
+        
         # 计算 MSE 损失
-        mse_loss = self.loss_fn(output, target)
+        mse_loss = self.loss_fn(output_masked, target)
         self.log('val_mse_loss', mse_loss, prog_bar=True, logger=True)
 
         # 计算 L1 损失
-        l1_loss = self.l1_loss_fn(output, target)
+        l1_loss = self.l1_loss_fn(output_masked, target)
         self.log('val_l1_loss', l1_loss, prog_bar=True, logger=True)
 
         # 返回一个字典，包含所有记录的损失值
@@ -176,7 +181,7 @@ class LightningDVAEDecoder(pl.LightningModule):
         }
 
 
-# In[4]:
+# In[ ]:
 
 
 # Faster, but less precise
@@ -199,7 +204,7 @@ train_size = len(dataset) - val_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
 if 'cuda' in str(device):
-    batch_size = 36
+    batch_size = 40
 else:
     batch_size = 1
 
@@ -219,11 +224,11 @@ ODIM = 100
 model_params = {
     'idim':IDIM, 
     'odim':ODIM, 
-    'bn_dim':128,
-    'hidden':256,
+    'bn_dim':256,
+    'hidden':512,
     'n_layer':2,
 }
-model = LightningDVAEDecoder(**model_params)
+model = LightningGradualDVAEDecoder(**model_params)
 
 # 自定义检查点保存的目录
 checkpoint_dir = './checkpoints'

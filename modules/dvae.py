@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from modules.firefly import ResBlock1
+
 class ConvNeXtBlock(nn.Module):
     def __init__(
         self,
@@ -283,6 +285,56 @@ class GradualDVAEDecoder(nn.Module):
             self.conv_mid.append(nn.GELU())
             current_dim //= 2
         # 最后一层将维度调整为odim
+        self.conv_mid.append(nn.Conv1d(current_dim, odim, kernel_size=3, stride=1, padding=1, dilation=1, bias=False))
+
+    def forward(self, input, conditioning=None):
+        x = input
+        x = self.conv_in(x)
+        for f in self.decoder_block:
+            x = f(x, conditioning)
+        for layer in self.conv_mid:
+            x = layer(x)
+        return x
+    
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ImprovedGradualDVAEDecoder(nn.Module):
+    def __init__(self, 
+                 idim,  # 输入维度
+                 odim,  # 输出维度
+                 n_layer = 12, # 解码层数
+                 bn_dim = 64,  # 初始卷积序列中瓶颈层的尺寸。
+                 hidden = 256, # 隐藏层的数量
+                 kernel = 7,   # 解码器块中卷积层的内核大小。
+                 dilation = 2, # 解码器块中卷积层的膨胀率。
+                ):
+        super().__init__()
+
+        self.conv_in = nn.Sequential(
+            nn.Conv1d(idim, bn_dim, 3, 1, 1), 
+            nn.LeakyReLU(0.01),
+            nn.Conv1d(bn_dim, hidden, 3, 1, 1)
+        )
+        self.decoder_block = nn.ModuleList([
+            ConvNeXtBlock(hidden, hidden * 4, kernel, dilation)
+            for _ in range(n_layer)])
+        
+        # 动态创建中间卷积层
+        self.conv_mid = nn.ModuleList()
+        current_dim = hidden
+
+        kernel_size =  -1
+        while current_dim > odim * 2:  # 确保最后一层的维度大于odim
+            kernel_size += 4
+            self.conv_mid.append(ResBlock1(current_dim, kernel_size, [1,3,5]))
+            self.conv_mid.append(nn.LeakyReLU(0.01))  # 在 ResBlock 之后添加 Leaky ReLU 激活层
+            self.conv_mid.append(nn.Conv1d(current_dim, current_dim // 2, kernel_size=3, stride=1, padding=1, dilation=1, bias=False))
+            current_dim //= 2
+        # 最后一层将维度调整为odim
+        self.conv_mid.append(nn.LeakyReLU(0.01))
         self.conv_mid.append(nn.Conv1d(current_dim, odim, kernel_size=3, stride=1, padding=1, dilation=1, bias=False))
 
     def forward(self, input, conditioning=None):

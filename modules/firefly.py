@@ -11,8 +11,10 @@ from torch import nn
 from torch.nn import Conv1d
 from torch.nn.utils.parametrizations import weight_norm
 from torch.nn.utils.parametrize import remove_parametrizations
+from torch.nn.utils import weight_norm, remove_weight_norm
 from torch.utils.checkpoint import checkpoint
 
+LRELU_SLOPE = 0.1
 
 def init_weights(m, mean=0.0, std=0.01):
     classname = m.__class__.__name__
@@ -114,6 +116,50 @@ class ResBlock1(torch.nn.Module):
             remove_parametrizations(conv, tensor_name="weight")
         for conv in self.convs2:
             remove_parametrizations(conv, tensor_name="weight")
+
+class ResBlock2(torch.nn.Module):
+    def __init__(self, channels, kernel_size=3, dilation=(1, 3)):
+        super(ResBlock2, self).__init__()
+        self.convs = nn.ModuleList(
+            [
+                weight_norm(
+                    Conv1d(
+                        channels,
+                        channels,
+                        kernel_size,
+                        1,
+                        dilation=dilation[0],
+                        padding=get_padding(kernel_size, dilation[0]),
+                    )
+                ),
+                weight_norm(
+                    Conv1d(
+                        channels,
+                        channels,
+                        kernel_size,
+                        1,
+                        dilation=dilation[1],
+                        padding=get_padding(kernel_size, dilation[1]),
+                    )
+                ),
+            ]
+        )
+        self.convs.apply(init_weights)
+
+    def forward(self, x, x_mask=None):
+        for c in self.convs:
+            xt = F.leaky_relu(x, LRELU_SLOPE)
+            if x_mask is not None:
+                xt = xt * x_mask
+            xt = c(xt)
+            x = xt + x
+        if x_mask is not None:
+            x = x * x_mask
+        return x
+
+    def remove_weight_norm(self):
+        for l in self.convs:
+            remove_weight_norm(l)
 
 
 class ParralelBlock(nn.Module):
